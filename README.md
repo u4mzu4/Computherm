@@ -6,12 +6,12 @@ HW for range extender:
 - Lolin D1 mini
 - RFM117W-868S1 transmitter
 - RFM217W-868S1 receiver
-- 868 Mhz helical antennas
+- 868 MHz helical antennas
 
 HW for receiver:
 - Sonoff TH10
 - RFM217W-868S1 receiver
-- 868 Mhz helical antenna
+- 868 MHz helical antenna
 
 SW based on this library:
 https://github.com/denxhun/ComputhermRF
