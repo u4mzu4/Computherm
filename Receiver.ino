@@ -1,82 +1,134 @@
 #include <ComputhermRF.h>
 
-#define BUTTONPIN 0
-#define RELAYPIN 12
+#define BUTTONPIN 10
+#define RELAYPIN1 12  //pump
+#define RELAYPIN2 5   //boiler
 #define LEDPIN 13
-#define INPUT_PIN 4
+#define INPUT_PIN 9
 #define DELAY 500
-#define AUTO 0
-#define MANUAL 1
+#define NRTRANS 3
+#define AFTERCIRCTIME 360000  //6 min
+
+//Enum
+enum MAIN_SM {
+  INIT      = 0,
+  OFF       = 1,
+  HEATING   = 2,
+  AFTERCIRC = 3,
+  MANUAL    = 4,
+  RESERVED  = 9
+};
 
 
-const String ADDR1 = "84BF7";
-const String ADDR2A = "E3DF7";
-const String ADDR2B = "DECAF";
+const String senderAdresses [NRTRANS] = {"84BF7", "E3DF7", "DECAF"};
 
-ComputhermRF rf = ComputhermRF(INPUT_PIN, 255);
+ComputhermRF rfReceiver = ComputhermRF(INPUT_PIN, 255);
+
+bool ProcessRFData ()
+{
+  String receivedAddress;
+  bool receivedCommand;
+  static bool heatingCommand [NRTRANS];
+  static unsigned long ledTimer;
+
+  if (rfReceiver.isDataAvailable()) {
+    rfReceiver.getData(receivedAddress, receivedCommand);
+    for (int i = 0; i < NRTRANS; i++)
+    {
+      if (senderAdresses[i] == receivedAddress)
+      {
+        heatingCommand[i] = receivedCommand;
+        digitalWrite(LEDPIN, LOW);
+        ledTimer = millis();
+      }
+    }
+  }
+  if ((millis() - ledTimer > DELAY) && !digitalRead(LEDPIN))
+  {
+    digitalWrite(LEDPIN, HIGH);
+  }
+  return ((heatingCommand[0] || heatingCommand[1]) || heatingCommand[2]);
+}
 
 void setup() {
   pinMode(BUTTONPIN, INPUT);
   pinMode(LEDPIN, OUTPUT);
-  pinMode(RELAYPIN, OUTPUT);
+  pinMode(RELAYPIN1, OUTPUT);
+  pinMode(RELAYPIN2, OUTPUT);
   digitalWrite(LEDPIN, HIGH);
-  digitalWrite(RELAYPIN, LOW);
-  rf.startReceiver();
+  digitalWrite(RELAYPIN1, LOW);
+  digitalWrite(RELAYPIN2, LOW);
+  rfReceiver.startReceiver();
 }
 
 void loop() {
-  String receivedAddress;
-  bool receivedCommand;
-  static bool command1;
-  static bool command2;
-  static bool modeState = AUTO;
-  static unsigned long ledTimer;
+  static MAIN_SM heatingState = INIT;
+  bool heatingNeeded;
+  static unsigned long afterCircStart;
 
-  if (!modeState)
+  switch (heatingState)
   {
-    if (rf.isDataAvailable()) {
-      rf.getData(receivedAddress, receivedCommand);
-      if (ADDR1 == receivedAddress)
+    case INIT:
       {
-        command1 = receivedCommand;
-        digitalWrite(LEDPIN, LOW);
-        ledTimer = millis();
+        heatingState = OFF;
+        heatingNeeded = 0;
+        break;
       }
-      if ((ADDR2A == receivedAddress) || (ADDR2B == receivedAddress))
+    case OFF:
       {
-        command2 = receivedCommand;
-        digitalWrite(LEDPIN, LOW);
-        ledTimer = millis();
+        heatingNeeded = ProcessRFData();
+        if (heatingNeeded)
+        {
+          digitalWrite(RELAYPIN1, HIGH);
+          digitalWrite(RELAYPIN2, HIGH);
+          heatingState = HEATING;
+        }
+        if (!digitalRead(BUTTONPIN))
+        {
+          digitalWrite(LEDPIN, LOW);
+          digitalWrite(RELAYPIN1, HIGH);
+          digitalWrite(RELAYPIN2, HIGH);
+          delay(DELAY);
+          heatingState = MANUAL;
+        }
+        break;
       }
-      if (command1 || command2)
+    case HEATING:
       {
-        digitalWrite(RELAYPIN, HIGH);
+        heatingNeeded = ProcessRFData();
+        if (!heatingNeeded)
+        {
+          digitalWrite(RELAYPIN2, LOW);
+          heatingState = AFTERCIRC;
+          afterCircStart = millis();
+        }
+        break;
       }
-      else
+    case AFTERCIRC:
       {
-        digitalWrite(RELAYPIN, LOW);
+        if (millis() - afterCircStart > AFTERCIRCTIME)
+        {
+          digitalWrite(RELAYPIN1, LOW);
+          heatingState = OFF;
+        }
+        break;
       }
-    }
-    if ((millis() > ledTimer + DELAY) && !digitalRead(LEDPIN))
-    {
-      digitalWrite(LEDPIN, HIGH);
-    }
-    if (!digitalRead(BUTTONPIN))
-    {
-      modeState = MANUAL;
-      digitalWrite(LEDPIN, LOW);
-      digitalWrite(RELAYPIN, HIGH);
-      delay(DELAY);
-    }
-  }
-  else
-  {
-    if (!digitalRead(BUTTONPIN))
-    {
-      modeState = AUTO;
-      digitalWrite(LEDPIN, HIGH);
-      digitalWrite(RELAYPIN, LOW);
-      delay(DELAY);
-    }
+    case MANUAL:
+      {
+        if (!digitalRead(BUTTONPIN))
+        {
+          digitalWrite(LEDPIN, HIGH);
+          digitalWrite(RELAYPIN1, LOW);
+          digitalWrite(RELAYPIN2, LOW);
+          delay(DELAY);
+          heatingState = OFF;
+        }
+        break;
+      }
+    default:
+      // empty
+      break;
   }
 }
+
+ 
