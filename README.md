@@ -9,7 +9,7 @@ HW for range extender:
 - 868 MHz helical antennas
 
 HW for receiver:
-- Sonoff TH10
+- Sonoff Dual R2 (ver. 1.4)
 - RFM217W-868S1 receiver
 - 868 MHz helical antenna
 
