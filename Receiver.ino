@@ -1,4 +1,5 @@
 #include <ComputhermRF.h>
+#include <ESPAsyncWebServer.h>
 
 #define BUTTONPIN 10
 #define RELAYPIN1 12  //pump
@@ -8,46 +9,69 @@
 #define DELAY 500
 #define NRTRANS 3
 #define AFTERCIRCTIME 360000  //6 min
+#define TIMEOUT 900000        //15 min
+#define PORT 80               //HTTP
 
 //Enum
 enum MAIN_SM {
-  INIT      = 0,
-  OFF       = 1,
-  HEATING   = 2,
+  INIT = 0,
+  OFF = 1,
+  HEATING = 2,
   AFTERCIRC = 3,
-  MANUAL    = 4,
-  RESERVED  = 9
+  MANUAL = 4,
+  RESERVED = 9
 };
 
 
-const String senderAdresses [NRTRANS] = {"84BF7", "E3DF7", "DECAF"};
+const String senderAdresses[NRTRANS] = { "84BF7", "E3DF7", "DECAF" };
+const char* ssid = "Thermostat";
+const char* password = "123456789";
+bool heatingCommand[NRTRANS];
+unsigned long lastCommandTime[NRTRANS];
+const char index_html[] PROGMEM = "<!DOCTYPE html><head><title>Termosztat</title></head><body><p>Ado 84BF7: %0PH%<br />Ido: %3PH%<br />Ado E3DF7: %1PH%<br />Ido: %4PH%<br />Erosito DECAF: %2PH%<br />Ido: %5PH%</p></p></body></html>";
 
 ComputhermRF rfReceiver = ComputhermRF(INPUT_PIN, 255);
+AsyncWebServer server(PORT);
 
-bool ProcessRFData ()
-{
+bool ProcessRFData() {
   String receivedAddress;
   bool receivedCommand;
-  static bool heatingCommand [NRTRANS];
   static unsigned long ledTimer;
 
   if (rfReceiver.isDataAvailable()) {
     rfReceiver.getData(receivedAddress, receivedCommand);
-    for (int i = 0; i < NRTRANS; i++)
-    {
-      if (senderAdresses[i] == receivedAddress)
-      {
+    for (int i = 0; i < NRTRANS; i++) {
+      if (senderAdresses[i] == receivedAddress) {
         heatingCommand[i] = receivedCommand;
         digitalWrite(LEDPIN, LOW);
         ledTimer = millis();
+        lastCommandTime[i] = millis();
       }
     }
   }
-  if ((millis() - ledTimer > DELAY) && !digitalRead(LEDPIN))
-  {
+  if ((millis() - ledTimer > DELAY) && !digitalRead(LEDPIN)) {
     digitalWrite(LEDPIN, HIGH);
   }
+  for (int j = 0; j < NRTRANS; j++) {
+    if (millis() - lastCommandTime[j] > TIMEOUT) {
+      heatingCommand[j] = false;
+    }
+  }
+
   return ((heatingCommand[0] || heatingCommand[1]) || heatingCommand[2]);
+}
+
+// Replaces placeholder with button section in your web page
+String processor(const String& var) {
+  String tempvar = var;
+  tempvar.remove(2);
+  int numberofPH = tempvar.toInt();
+  if (numberofPH < NRTRANS) {
+    return ((heatingCommand[numberofPH] == 0) ? "OFF" : "ON");
+  } else {
+        unsigned long cmdTime = (millis() - lastCommandTime[numberofPH - 3])>>10;
+    return String(cmdTime);
+  }
 }
 
 void setup() {
@@ -59,6 +83,13 @@ void setup() {
   digitalWrite(RELAYPIN1, LOW);
   digitalWrite(RELAYPIN2, LOW);
   rfReceiver.startReceiver();
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  delay(500);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send_P(200, "text/html", index_html, processor);
+  });
+  server.begin();
 }
 
 void loop() {
@@ -66,8 +97,7 @@ void loop() {
   bool heatingNeeded;
   static unsigned long afterCircStart;
 
-  switch (heatingState)
-  {
+  switch (heatingState) {
     case INIT:
       {
         heatingState = OFF;
@@ -77,14 +107,12 @@ void loop() {
     case OFF:
       {
         heatingNeeded = ProcessRFData();
-        if (heatingNeeded)
-        {
+        if (heatingNeeded) {
           digitalWrite(RELAYPIN1, HIGH);
           digitalWrite(RELAYPIN2, HIGH);
           heatingState = HEATING;
         }
-        if (!digitalRead(BUTTONPIN))
-        {
+        if (!digitalRead(BUTTONPIN)) {
           digitalWrite(LEDPIN, LOW);
           digitalWrite(RELAYPIN1, HIGH);
           digitalWrite(RELAYPIN2, HIGH);
@@ -96,8 +124,7 @@ void loop() {
     case HEATING:
       {
         heatingNeeded = ProcessRFData();
-        if (!heatingNeeded)
-        {
+        if (!heatingNeeded) {
           digitalWrite(RELAYPIN2, LOW);
           heatingState = AFTERCIRC;
           afterCircStart = millis();
@@ -106,8 +133,7 @@ void loop() {
       }
     case AFTERCIRC:
       {
-        if (millis() - afterCircStart > AFTERCIRCTIME)
-        {
+        if (millis() - afterCircStart > AFTERCIRCTIME) {
           digitalWrite(RELAYPIN1, LOW);
           heatingState = OFF;
         }
@@ -115,8 +141,7 @@ void loop() {
       }
     case MANUAL:
       {
-        if (!digitalRead(BUTTONPIN))
-        {
+        if (!digitalRead(BUTTONPIN)) {
           digitalWrite(LEDPIN, HIGH);
           digitalWrite(RELAYPIN1, LOW);
           digitalWrite(RELAYPIN2, LOW);
@@ -130,5 +155,3 @@ void loop() {
       break;
   }
 }
-
- 
